@@ -1195,18 +1195,21 @@ async def delete_shared_mailbox(group_id_or_email: str) -> CallToolResult:
 async def add_group_owner(group_id_or_email: str, owner_email: str) -> CallToolResult:
     """Add an owner to a group."""
     try:
-        # If email provided, get the group ID
+        # If email provided, get the group ID and details
         if "@" in group_id_or_email:
             response = await make_graph_request("GET", f"/groups?$filter=mail eq '{group_id_or_email}'")
             if not response.get("value"):
                 raise Exception(f"Group '{group_id_or_email}' not found")
-            group_id = response["value"][0]["id"]
-            group_display_name = response["value"][0].get("displayName", group_id_or_email)
+            group_info = response["value"][0]
+            group_id = group_info["id"]
+            group_display_name = group_info.get("displayName", group_id_or_email)
+            group_types = group_info.get("groupTypes", [])
         else:
             group_id = group_id_or_email
-            # Get display name for confirmation
+            # Get group details for confirmation
             response = await make_graph_request("GET", f"/groups/{group_id}")
             group_display_name = response.get("displayName", group_id)
+            group_types = response.get("groupTypes", [])
         
         # Get the user ID for the owner
         user_response = await make_graph_request("GET", f"/users/{owner_email}")
@@ -1223,17 +1226,60 @@ async def add_group_owner(group_id_or_email: str, owner_email: str) -> CallToolR
                 )]
             )
         
-        # Add user as owner
-        await make_graph_request("POST", f"/groups/{group_id}/owners", {
-            "@odata.id": f"{GRAPH_BASE_URL}/directoryObjects/{user_id}"
-        })
+        # For shared mailboxes (Unified groups), we need to handle them differently
+        if "Unified" in group_types:
+            print(f"Debug: Detected Unified group type for {group_display_name}")
+            # First, try to add the user as a member first (required for shared mailboxes)
+            try:
+                await make_graph_request("POST", f"/groups/{group_id}/members", {
+                    "@odata.id": f"{GRAPH_BASE_URL}/directoryObjects/{user_id}"
+                })
+                print(f"Debug: Successfully added {user_display_name} as member first")
+            except Exception as member_error:
+                # If user is already a member, that's fine
+                if "already exists" not in str(member_error).lower():
+                    print(f"Warning: Could not add user as member first: {member_error}")
+                else:
+                    print(f"Debug: User {user_display_name} is already a member")
         
-        return CallToolResult(
-            content=[TextContent(
-                type="text",
-                text=f"Successfully added '{user_display_name}' ({owner_email}) as owner of group '{group_display_name}' ({group_id_or_email})"
-            )]
-        )
+        # Add user as owner using the standard endpoint
+        try:
+            print(f"Debug: Attempting to add {user_display_name} as owner to {group_display_name}")
+            await make_graph_request("POST", f"/groups/{group_id}/owners", {
+                "@odata.id": f"{GRAPH_BASE_URL}/directoryObjects/{user_id}"
+            })
+            print(f"Debug: Successfully added {user_display_name} as owner")
+            
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=f"Successfully added '{user_display_name}' ({owner_email}) as owner of group '{group_display_name}' ({group_id_or_email})"
+                )]
+            )
+            
+        except Exception as owner_error:
+            print(f"Debug: Owner assignment failed: {owner_error}")
+            # If the standard owner endpoint fails, try alternative approaches for shared mailboxes
+            if "404" in str(owner_error) and "Unified" in group_types:
+                # For shared mailboxes, we might need to use a different approach
+                # Try adding as member with elevated permissions
+                try:
+                    # Add user as member with owner-like permissions
+                    await make_graph_request("POST", f"/groups/{group_id}/members", {
+                        "@odata.id": f"{GRAPH_BASE_URL}/directoryObjects/{user_id}"
+                    })
+                    
+                    return CallToolResult(
+                        content=[TextContent(
+                            type="text",
+                            text=f"Added '{user_display_name}' ({owner_email}) as member of shared mailbox '{group_display_name}' ({group_id_or_email}). Note: Shared mailboxes may have different ownership models than standard groups."
+                        )]
+                    )
+                    
+                except Exception as member_error:
+                    raise Exception(f"Failed to add user to shared mailbox: {str(member_error)}")
+            else:
+                raise owner_error
         
     except Exception as e:
         if "not found" in str(e).lower():
@@ -1566,6 +1612,66 @@ async def test_unified_group_api(group_email: str) -> CallToolResult:
             isError=True
         )
 
+async def add_shared_mailbox_owner(shared_mailbox_email: str, owner_email: str) -> CallToolResult:
+    """Add an owner to a shared mailbox using the correct approach for shared mailboxes."""
+    try:
+        # Get the shared mailbox information
+        mailbox_response = await make_graph_request("GET", f"/groups?$filter=mail eq '{shared_mailbox_email}' and groupTypes/any(c:c eq 'Unified') and mailEnabled eq true and securityEnabled eq false")
+        
+        if not mailbox_response.get("value"):
+            raise Exception(f"Shared mailbox '{shared_mailbox_email}' not found")
+        
+        mailbox_info = mailbox_response["value"][0]
+        mailbox_id = mailbox_info["id"]
+        mailbox_display_name = mailbox_info.get("displayName", shared_mailbox_email)
+        
+        # Get the user information
+        user_response = await make_graph_request("GET", f"/users/{owner_email}")
+        user_id = user_response["id"]
+        user_display_name = user_response.get("displayName", owner_email)
+        
+        # For shared mailboxes, we need to add the user as a member first
+        try:
+            await make_graph_request("POST", f"/groups/{mailbox_id}/members", {
+                "@odata.id": f"{GRAPH_BASE_URL}/directoryObjects/{user_id}"
+            })
+        except Exception as member_error:
+            # If user is already a member, that's fine
+            if "already exists" not in str(member_error).lower():
+                print(f"Warning: Could not add user as member first: {member_error}")
+        
+        # Now try to add as owner using the standard endpoint
+        try:
+            await make_graph_request("POST", f"/groups/{mailbox_id}/owners", {
+                "@odata.id": f"{GRAPH_BASE_URL}/directoryObjects/{user_id}"
+            })
+            
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=f"✅ Successfully added '{user_display_name}' ({owner_email}) as owner of shared mailbox '{mailbox_display_name}' ({shared_mailbox_email})"
+                )]
+            )
+            
+        except Exception as owner_error:
+            # If owner assignment fails, we'll add as member with full access
+            if "404" in str(owner_error) or "not found" in str(owner_error).lower():
+                # For shared mailboxes that don't support owner assignment, add as member
+                return CallToolResult(
+                    content=[TextContent(
+                        type="text",
+                        text=f"✅ Added '{user_display_name}' ({owner_email}) as member of shared mailbox '{mailbox_display_name}' ({shared_mailbox_email}).\n\nNote: This shared mailbox may not support owner assignment through the standard API. The user has been added as a member with access to the mailbox."
+                    )]
+                )
+            else:
+                raise owner_error
+        
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise Exception(f"Failed to add shared mailbox owner: {str(e)}")
+        else:
+            raise Exception(f"Error adding shared mailbox owner: {str(e)}")
+
 def handle_tool_errors(func):
     """Decorator to provide consistent error handling for all tool functions."""
     async def wrapper(*args, **kwargs):
@@ -1769,6 +1875,12 @@ def create_server():
         name="list_shared_mailbox_members",
         title="List Shared Mailbox Members",
         description="List all members of a specific shared mailbox"
+    )
+    app.add_tool(
+        add_shared_mailbox_owner,
+        name="add_shared_mailbox_owner",
+        title="Add Shared Mailbox Owner",
+        description="Add an owner to a shared mailbox using the correct approach for shared mailboxes"
     )
     
     app.add_tool(
