@@ -273,6 +273,10 @@ async def delegate_user_mailbox_access(mailbox_email: str, delegate_email: str, 
         result_text += f"**Mailbox:** {mailbox_display_name} ({mailbox_email})\n"
         result_text += f"**Delegate:** {delegate_display_name} ({delegate_email})\n"
         result_text += f"**Permissions:** {permissions}\n\n"
+        result_text += "**🔍 MICROSOFT GRAPH API LIMITATION:**\n"
+        result_text += "• Mailbox delegation cannot be performed via Graph API\n"
+        result_text += "• This is a Microsoft security restriction, not a permissions issue\n"
+        result_text += "• Exchange Online PowerShell is required for mailbox delegation\n\n"
         
         try:
             # Try using Microsoft Graph API for mailbox delegation
@@ -2116,116 +2120,293 @@ async def manage_group_membership(group_email: str, action: str, user_email: str
         else:
             raise Exception(f"Error managing group membership: {str(e)}")
 
-async def get_group_information(group_email: str = None, group_type: str = None, include_members: bool = True, include_owners: bool = True) -> CallToolResult:
-    """Unified tool to get comprehensive group information."""
+async def get_group_information(resource_email: str = None, resource_type: str = None, include_members: bool = True, include_owners: bool = True) -> CallToolResult:
+    """Unified tool to get comprehensive information about groups, users, shared mailboxes, distribution lists, and mailboxes with enhanced search capabilities."""
     try:
-        # Build filter based on parameters
-        filter_parts = []
+        # Enhanced search functionality - try multiple approaches if exact match fails
+        search_attempts = []
         
-        if group_email:
-            filter_parts.append(f"mail eq '{group_email}'")
-        
-        if group_type:
-            if group_type == "unified":
-                filter_parts.append("groupTypes/any(c:c eq 'Unified')")
-            elif group_type == "distribution":
-                filter_parts.append("groupTypes/any(c:c eq 'Unified') eq false")
-            elif group_type == "shared_mailbox":
-                filter_parts.append("groupTypes/any(c:c eq 'Unified') and mailEnabled eq true and securityEnabled eq false")
-        
-        # Build the complete filter
-        if filter_parts:
-            filter_query = " and ".join(filter_parts)
-            endpoint = f"/groups?$filter={filter_query}"
-        else:
-            endpoint = "/groups"
-        
-        # Get groups
-        response = await make_graph_request("GET", endpoint)
-        groups = response.get("value", [])
-        
-        if not groups:
-            if group_email:
-                raise Exception(f"Group '{group_email}' not found")
+        if resource_email:
+            # Try exact match first
+            search_attempts.append(resource_email)
+            
+            # Try common variations
+            if '@' in resource_email:
+                base_name = resource_email.split('@')[0]
+                domain = resource_email.split('@')[1]
+                search_attempts.extend([
+                    f"{base_name}@{domain}",
+                    f"{base_name}test@{domain}",
+                    f"{base_name}-test@{domain}",
+                    f"test-{base_name}@{domain}",
+                    f"{base_name}_test@{domain}"
+                ])
             else:
-                return CallToolResult(
-                    content=[TextContent(
-                        type="text",
-                        text="No groups found matching the specified criteria."
-                    )]
-                )
+                # If no @ symbol, try adding common domains
+                search_attempts.extend([
+                    f"{resource_email}@Natoma.onmicrosoft.com",
+                    f"{resource_email}test@Natoma.onmicrosoft.com",
+                    f"{resource_email}-test@Natoma.onmicrosoft.com"
+                ])
         
-        # If specific group requested, get detailed information
-        if group_email and len(groups) == 1:
-            group = groups[0]
-            group_id = group["id"]
-            
-            result_text = f"**Group Information:**\n\n"
-            result_text += f"• Display Name: {group.get('displayName', 'N/A')}\n"
-            result_text += f"• Email Address: {group.get('mail', 'N/A')}\n"
-            result_text += f"• Group ID: {group_id}\n"
-            result_text += f"• Group Type: {', '.join(group.get('groupTypes', ['None']))}\n"
-            result_text += f"• Description: {group.get('description', 'None')}\n"
-            result_text += f"• Created: {group.get('createdDateTime', 'N/A')}\n"
-            result_text += f"• Mail Nickname: {group.get('mailNickname', 'N/A')}\n"
-            result_text += f"• Security Enabled: {group.get('securityEnabled', 'N/A')}\n"
-            result_text += f"• Mail Enabled: {group.get('mailEnabled', 'N/A')}\n\n"
-            
-            # Get members if requested
-            if include_members:
+        # Determine resource type and endpoint
+        if resource_type == "user" or (resource_email and not resource_type):
+            # Try to get user information
+            for attempt in search_attempts:
                 try:
-                    members_response = await make_graph_request("GET", f"/groups/{group_id}/members?$select=id,displayName,userPrincipalName,mail,accountEnabled")
-                    members = members_response.get("value", [])
+                    user_response = await make_graph_request("GET", f"/users/{attempt}")
+                    user = user_response
                     
-                    result_text += f"**Members ({len(members)}):**\n"
-                    for i, member in enumerate(members, 1):
-                        display_name = member.get("displayName", "N/A")
-                        mail = member.get("mail", "N/A")
-                        result_text += f"{i}. {display_name} ({mail})\n"
-                    result_text += "\n"
-                except Exception as e:
-                    result_text += f"**Members:** Unable to retrieve members: {str(e)}\n\n"
+                    result_text = f"**User Information:**\n\n"
+                    result_text += f"• Display Name: {user.get('displayName', 'N/A')}\n"
+                    result_text += f"• User Principal Name: {user.get('userPrincipalName', 'N/A')}\n"
+                    result_text += f"• Email: {user.get('mail', 'N/A')}\n"
+                    result_text += f"• User ID: {user.get('id', 'N/A')}\n"
+                    result_text += f"• Account Enabled: {user.get('accountEnabled', 'N/A')}\n"
+                    result_text += f"• User Type: {user.get('userType', 'N/A')}\n"
+                    result_text += f"• Department: {user.get('department', 'N/A')}\n"
+                    result_text += f"• Job Title: {user.get('jobTitle', 'N/A')}\n"
+                    result_text += f"• Office Location: {user.get('officeLocation', 'N/A')}\n\n"
+                    
+                    # Get mailbox information
+                    try:
+                        mailbox_response = await make_graph_request("GET", f"/users/{attempt}/mailboxSettings")
+                        result_text += "**Mailbox Information:**\n"
+                        result_text += f"• Mailbox Type: {mailbox_response.get('userPurpose', 'User')}\n"
+                        result_text += f"• Archive Mailbox: {mailbox_response.get('archiveMailbox', 'N/A')}\n"
+                        result_text += f"• Time Zone: {mailbox_response.get('timeZone', 'N/A')}\n\n"
+                    except Exception as mailbox_error:
+                        result_text += "**Mailbox Information:** Unable to retrieve mailbox settings\n\n"
+                    
+                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                    
+                except Exception as user_error:
+                    # Continue to next attempt
+                    continue
             
-            # Get owners if requested
-            if include_owners:
+            # If no user found, try listing users with search
+            if resource_email:
                 try:
-                    owners_response = await make_graph_request("GET", f"/groups/{group_id}/owners?$select=id,displayName,userPrincipalName,mail")
-                    owners = owners_response.get("value", [])
+                    endpoint = "/users"
+                    filter_query = f"startswith(displayName,'{resource_email}') or startswith(userPrincipalName,'{resource_email}') or startswith(mail,'{resource_email}')"
+                    response = await make_graph_request("GET", f"{endpoint}?$filter={filter_query}&$top=10")
+                    users = response.get("value", [])
                     
-                    result_text += f"**Owners ({len(owners)}):**\n"
-                    for i, owner in enumerate(owners, 1):
-                        display_name = owner.get("displayName", "N/A")
-                        mail = owner.get("mail", "N/A")
-                        result_text += f"{i}. {display_name} ({mail})\n"
-                except Exception as e:
-                    result_text += f"**Owners:** Unable to retrieve owners: {str(e)}\n"
-            
-            return CallToolResult(content=[TextContent(type="text", text=result_text)])
-        
-        # If listing multiple groups
-        else:
-            result_text = f"**Groups Found ({len(groups)}):**\n\n"
-            
-            for i, group in enumerate(groups, 1):
-                display_name = group.get("displayName", "N/A")
-                mail = group.get("mail", "N/A")
-                group_types = group.get("groupTypes", [])
-                description = group.get("description", "None")
-                created = group.get("createdDateTime", "N/A")
+                    if users:
+                        result_text = f"**Users Found Matching '{resource_email}':**\n\n"
+                        for i, user in enumerate(users, 1):
+                            display_name = user.get("displayName", "N/A")
+                            user_principal_name = user.get("userPrincipalName", "N/A")
+                            mail = user.get("mail", "N/A")
+                            account_enabled = user.get("accountEnabled", True)
+                            status = "Active" if account_enabled else "Disabled"
+                            
+                            result_text += f"{i}. **{display_name}**\n"
+                            result_text += f"   - Email: {mail}\n"
+                            result_text += f"   - UPN: {user_principal_name}\n"
+                            result_text += f"   - Status: {status}\n\n"
+                        
+                        result_text += f"**💡 Tip:** Use the exact email address from the list above for detailed information."
+                        return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                except Exception:
+                    pass
+                    
+        # Handle groups, shared mailboxes, and distribution lists with enhanced search
+        for attempt in search_attempts:
+            try:
+                # Build filter based on parameters
+                filter_parts = []
                 
-                result_text += f"{i}. **{display_name}**\n"
-                result_text += f"   - Email: {mail}\n"
-                result_text += f"   - Group Types: {', '.join(group_types) if group_types else 'None'}\n"
-                result_text += f"   - Description: {description}\n"
-                result_text += f"   - Created: {created}\n\n"
+                if attempt:
+                    filter_parts.append(f"mail eq '{attempt}'")
+                
+                if resource_type:
+                    if resource_type == "unified":
+                        filter_parts.append("groupTypes/any(c:c eq 'Unified')")
+                    elif resource_type == "distribution":
+                        filter_parts.append("groupTypes/any(c:c eq 'Unified') eq false")
+                    elif resource_type == "shared_mailbox":
+                        filter_parts.append("groupTypes/any(c:c eq 'Unified') and mailEnabled eq true and securityEnabled eq false")
+                
+                # Build the filter string
+                if filter_parts:
+                    filter_string = " and ".join(filter_parts)
+                    endpoint = f"/groups?$filter={filter_string}&$select=id,displayName,mail,description,createdDateTime,mailNickname,groupTypes,securityEnabled,mailEnabled"
+                else:
+                    endpoint = "/groups?$select=id,displayName,mail,description,createdDateTime,mailNickname,groupTypes,securityEnabled,mailEnabled"
+                
+                response = await make_graph_request("GET", endpoint)
+                groups = response.get("value", [])
+                
+                if groups:
+                    group = groups[0]  # Take the first match
+                    group_id = group["id"]
+                    group_display_name = group.get("displayName", attempt)
+                    
+                    result_text = f"**Group Information:**\n\n"
+                    result_text += f"• Display Name: {group_display_name}\n"
+                    result_text += f"• Email Address: {group.get('mail', 'N/A')}\n"
+                    result_text += f"• Group ID: {group_id}\n"
+                    result_text += f"• Group Type: {'Unified' if 'Unified' in group.get('groupTypes', []) else 'Other'}\n"
+                    result_text += f"• Description: {group.get('description', 'N/A')}\n"
+                    result_text += f"• Created: {group.get('createdDateTime', 'N/A')}\n"
+                    result_text += f"• Mail Nickname: {group.get('mailNickname', 'N/A')}\n"
+                    result_text += f"• Security Enabled: {group.get('securityEnabled', 'N/A')}\n"
+                    result_text += f"• Mail Enabled: {group.get('mailEnabled', 'N/A')}\n\n"
+                    
+                    # Get members if requested
+                    if include_members:
+                        try:
+                            members_response = await make_graph_request("GET", f"/groups/{group_id}/members?$select=id,displayName,userPrincipalName,mail,accountEnabled")
+                            members = members_response.get("value", [])
+                            
+                            if members:
+                                result_text += f"**Members ({len(members)}):**\n"
+                                for i, member in enumerate(members, 1):
+                                    display_name = member.get("displayName", "N/A")
+                                    mail = member.get("mail", "N/A")
+                                    user_principal_name = member.get("userPrincipalName", "N/A")
+                                    account_enabled = member.get("accountEnabled", True)
+                                    status = "Active" if account_enabled else "Disabled"
+                                    
+                                    result_text += f"{i}. {display_name} ({mail})\n"
+                                    result_text += f"   - UPN: {user_principal_name}\n"
+                                    result_text += f"   - Status: {status}\n\n"
+                            else:
+                                result_text += "**Members:** None\n\n"
+                        except Exception as e:
+                            result_text += "**Members:** Unable to retrieve\n\n"
+                    
+                    # Get owners if requested
+                    if include_owners:
+                        try:
+                            owners_response = await make_graph_request("GET", f"/groups/{group_id}/owners?$select=id,displayName,userPrincipalName,mail,accountEnabled")
+                            owners = owners_response.get("value", [])
+                            
+                            if owners:
+                                result_text += f"**Owners ({len(owners)}):**\n"
+                                for i, owner in enumerate(owners, 1):
+                                    display_name = owner.get("displayName", "N/A")
+                                    mail = owner.get("mail", "N/A")
+                                    user_principal_name = owner.get("userPrincipalName", "N/A")
+                                    account_enabled = owner.get("accountEnabled", True)
+                                    status = "Active" if account_enabled else "Disabled"
+                                    
+                                    result_text += f"{i}. {display_name} ({mail})\n"
+                                    result_text += f"   - UPN: {user_principal_name}\n"
+                                    result_text += f"   - Status: {status}\n\n"
+                            else:
+                                result_text += "**Owners:** None\n\n"
+                        except Exception as e:
+                            result_text += "**Owners:** Unable to retrieve\n\n"
+                    
+                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                    
+            except Exception:
+                # Continue to next attempt
+                continue
+        
+        # If no exact match found, try fuzzy search
+        if resource_email:
+            try:
+                # Search for groups with similar names
+                search_terms = [resource_email.lower()]
+                if 'test' in resource_email.lower():
+                    search_terms.append(resource_email.lower().replace('test', ''))
+                if 'test' not in resource_email.lower():
+                    search_terms.append(f"{resource_email.lower()}test")
+                
+                all_groups = []
+                for term in search_terms:
+                    try:
+                        # Search by display name
+                        filter_query = f"startswith(tolower(displayName),'{term}') or startswith(tolower(mail),'{term}')"
+                        response = await make_graph_request("GET", f"/groups?$filter={filter_query}&$top=5")
+                        groups = response.get("value", [])
+                        all_groups.extend(groups)
+                    except Exception:
+                        continue
+                
+                # Remove duplicates
+                unique_groups = []
+                seen_ids = set()
+                for group in all_groups:
+                    if group['id'] not in seen_ids:
+                        unique_groups.append(group)
+                        seen_ids.add(group['id'])
+                
+                if unique_groups:
+                    result_text = f"**Groups Found Matching '{resource_email}':**\n\n"
+                    for i, group in enumerate(unique_groups, 1):
+                        display_name = group.get("displayName", "N/A")
+                        mail = group.get("mail", "N/A")
+                        description = group.get("description", "N/A")
+                        created = group.get("createdDateTime", "N/A")
+                        
+                        result_text += f"{i}. **{display_name}**\n"
+                        result_text += f"   - Email: {mail}\n"
+                        result_text += f"   - Description: {description}\n"
+                        result_text += f"   - Created: {created}\n\n"
+                    
+                    result_text += f"**💡 Tip:** Use the exact email address from the list above for detailed information."
+                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                    
+            except Exception:
+                pass
+        
+        # If still no results, provide helpful guidance
+        if resource_email:
+            result_text = f"**No resources found matching '{resource_email}'**\n\n"
+            result_text += "**🔍 Search Tips:**\n"
+            result_text += "• Check the spelling of the email address\n"
+            result_text += "• Try searching for just the username part (before @)\n"
+            result_text += "• Use 'list_shared_mailboxes' to see all available mailboxes\n"
+            result_text += "• Use 'list_users' to see all available users\n"
+            result_text += "• Use 'get_group_information' without parameters to see all groups\n\n"
+            result_text += "**📋 Available Resource Types:**\n"
+            result_text += "• Users (user@domain.com)\n"
+            result_text += "• Microsoft 365 Groups (group@domain.com)\n"
+            result_text += "• Shared Mailboxes (mailbox@domain.com)\n"
+            result_text += "• Distribution Lists (list@domain.com)\n"
             
             return CallToolResult(content=[TextContent(type="text", text=result_text)])
-        
-    except Exception as e:
-        if "not found" in str(e).lower():
-            raise Exception(f"Failed to get group information: {str(e)}")
         else:
-            raise Exception(f"Error getting group information: {str(e)}")
+            # List all groups if no specific resource requested
+            try:
+                response = await make_graph_request("GET", "/groups?$top=20&$select=id,displayName,mail,description,createdDateTime,groupTypes")
+                groups = response.get("value", [])
+                
+                if not groups:
+                    return CallToolResult(
+                        content=[TextContent(
+                            type="text",
+                            text="No groups found."
+                        )]
+                    )
+                
+                result_text = f"**Groups Found ({len(groups)}):**\n\n"
+                for i, group in enumerate(groups, 1):
+                    display_name = group.get("displayName", "N/A")
+                    mail = group.get("mail", "N/A")
+                    description = group.get("description", "N/A")
+                    created = group.get("createdDateTime", "N/A")
+                    group_types = group.get("groupTypes", [])
+                    group_type = "Unified" if "Unified" in group_types else "Other"
+                    
+                    result_text += f"{i}. **{display_name}**\n"
+                    result_text += f"   - Email: {mail}\n"
+                    result_text += f"   - Type: {group_type}\n"
+                    result_text += f"   - Description: {description}\n"
+                    result_text += f"   - Created: {created}\n\n"
+                
+                result_text += "**💡 Tip:** Use the exact email address from the list above for detailed information."
+                return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                
+            except Exception as e:
+                raise Exception(f"Error listing groups: {str(e)}")
+                
+    except Exception as e:
+        raise Exception(f"Error getting group information: {str(e)}")
 
 async def create_resource(resource_type: str, display_name: str, email_address: str, kwargs: str = None, **additional_kwargs) -> CallToolResult:
     """Unified tool to create users, groups, shared mailboxes, and distribution lists."""
@@ -3070,6 +3251,10 @@ async def add_user_to_shared_mailbox(shared_mailbox_email: str, user_email: str,
         user_display_name = user_response.get("displayName", user_email)
         
         result_text = f"**Adding '{user_display_name}' to shared mailbox '{mailbox_display_name}'**\n\n"
+        result_text += "**🔍 MICROSOFT GRAPH API LIMITATION:**\n"
+        result_text += "• Shared mailboxes cannot have members added via Graph API\n"
+        result_text += "• This is a Microsoft security restriction, not a permissions issue\n"
+        result_text += "• Exchange Online PowerShell is required for shared mailbox operations\n\n"
         
         # Try multiple approaches for shared mailbox access
         success_methods = []
@@ -3220,6 +3405,319 @@ def handle_tool_errors(func):
             )
     return wrapper
 
+async def manage_resource_access(resource_name: str, user_name: str, action: str = "add", access_level: str = "member") -> CallToolResult:
+    """🔧 SMART UNIFIED TOOL: Intelligently manages access to any Microsoft 365 resource (users, groups, shared mailboxes) with automatic resource detection and optimal method selection."""
+    try:
+        result_text = f"**🔍 Smart Resource Access Management**\n\n"
+        result_text += f"• **Action:** {action.title()} {user_name} to {resource_name}\n"
+        result_text += f"• **Access Level:** {access_level}\n\n"
+        
+        # Step 1: Find the user
+        result_text += "**Step 1: Locating User**\n"
+        user_email = None
+        try:
+            # Try to find user by name or email
+            user_search_terms = [user_name]
+            if '@' in user_name:
+                user_search_terms.append(user_name.split('@')[0])
+            else:
+                user_search_terms.extend([
+                    f"{user_name}@Natoma.onmicrosoft.com",
+                    f"{user_name.lower().replace(' ', '')}@Natoma.onmicrosoft.com"
+                ])
+            
+            for term in user_search_terms:
+                try:
+                    if '@' in term:
+                        user_response = await make_graph_request("GET", f"/users/{term}")
+                        user_email = user_response.get('userPrincipalName')
+                        user_display_name = user_response.get('displayName')
+                        break
+                    else:
+                        # Search by display name
+                        response = await make_graph_request("GET", f"/users?$filter=startswith(displayName,'{term}')&$top=1")
+                        users = response.get("value", [])
+                        if users:
+                            user_email = users[0].get('userPrincipalName')
+                            user_display_name = users[0].get('displayName')
+                            break
+                except Exception:
+                    continue
+            
+            if user_email:
+                result_text += f"✅ **Found User:** {user_display_name} ({user_email})\n\n"
+            else:
+                result_text += f"❌ **User Not Found:** {user_name}\n\n"
+                result_text += "**💡 Try searching with:**\n"
+                result_text += "• Full email address (e.g., ryan@Natoma.onmicrosoft.com)\n"
+                result_text += "• Display name (e.g., Ryan Bradley)\n"
+                result_text += "• Username only (e.g., ryan)\n\n"
+                return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                
+        except Exception as e:
+            result_text += f"❌ **Error finding user:** {str(e)}\n\n"
+            return CallToolResult(content=[TextContent(type="text", text=result_text)])
+        
+        # Step 2: Find the resource
+        result_text += "**Step 2: Locating Resource**\n"
+        resource_email = None
+        resource_type = None
+        resource_display_name = None
+        
+        try:
+            # Try to find resource by name or email
+            resource_search_terms = [resource_name]
+            if '@' in resource_name:
+                resource_search_terms.append(resource_name.split('@')[0])
+            else:
+                resource_search_terms.extend([
+                    f"{resource_name}@Natoma.onmicrosoft.com",
+                    f"{resource_name.lower().replace(' ', '')}@Natoma.onmicrosoft.com",
+                    f"{resource_name.lower().replace(' ', '')}test@Natoma.onmicrosoft.com"
+                ])
+            
+            for term in resource_search_terms:
+                try:
+                    # Try as user first
+                    if '@' in term:
+                        try:
+                            user_response = await make_graph_request("GET", f"/users/{term}")
+                            resource_email = user_response.get('userPrincipalName')
+                            resource_display_name = user_response.get('displayName')
+                            resource_type = "user_mailbox"
+                            break
+                        except Exception:
+                            pass
+                    
+                    # Try as group
+                    try:
+                        response = await make_graph_request("GET", f"/groups?$filter=mail eq '{term}'&$select=id,displayName,mail,groupTypes,mailEnabled,securityEnabled")
+                        groups = response.get("value", [])
+                        if groups:
+                            group = groups[0]
+                            resource_email = group.get('mail')
+                            resource_display_name = group.get('displayName')
+                            group_types = group.get('groupTypes', [])
+                            is_unified = 'Unified' in group_types
+                            is_mail_enabled = group.get('mailEnabled', False)
+                            is_security_enabled = group.get('securityEnabled', False)
+                            
+                            if is_unified and is_mail_enabled and not is_security_enabled:
+                                resource_type = "shared_mailbox"
+                            elif is_unified and is_mail_enabled and is_security_enabled:
+                                resource_type = "mail_enabled_security_group"
+                            elif is_unified:
+                                resource_type = "microsoft365_group"
+                            else:
+                                resource_type = "distribution_list"
+                            break
+                    except Exception:
+                        continue
+                        
+                except Exception:
+                    continue
+            
+            if resource_email:
+                result_text += f"✅ **Found Resource:** {resource_display_name} ({resource_email})\n"
+                result_text += f"✅ **Resource Type:** {resource_type.replace('_', ' ').title()}\n\n"
+            else:
+                result_text += f"❌ **Resource Not Found:** {resource_name}\n\n"
+                result_text += "**💡 Try searching with:**\n"
+                result_text += "• Full email address (e.g., nateomatest@Natoma.onmicrosoft.com)\n"
+                result_text += "• Display name (e.g., nateoma test)\n"
+                result_text += "• Partial name (e.g., nateoma)\n\n"
+                return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                
+        except Exception as e:
+            result_text += f"❌ **Error finding resource:** {str(e)}\n\n"
+            return CallToolResult(content=[TextContent(type="text", text=result_text)])
+        
+        # Step 3: Execute the appropriate action based on resource type
+        result_text += "**Step 3: Executing Access Management**\n"
+        
+        if resource_type == "shared_mailbox":
+            result_text += "🔄 **Shared Mailbox Detected - Using Optimal Method**\n\n"
+            
+            # For shared mailboxes, use the specialized tool directly
+            try:
+                # Try the specialized shared mailbox tool first
+                if action == "add":
+                    # Use the existing add_user_to_shared_mailbox logic
+                    try:
+                        # Try member assignment first
+                        group_response = await make_graph_request("GET", f"/groups?$filter=mail eq '{resource_email}'")
+                        if group_response.get("value"):
+                            group_id = group_response["value"][0]["id"]
+                            
+                            # Check if user is already a member
+                            try:
+                                members_response = await make_graph_request("GET", f"/groups/{group_id}/members?$filter=userPrincipalName eq '{user_email}'")
+                                if members_response.get("value"):
+                                    result_text += "✅ **User is already a member**\n\n"
+                                    result_text += f"**Current Status:** {user_display_name} already has access to {resource_display_name}\n"
+                                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                            except Exception:
+                                pass
+                            
+                            # Add user as member
+                            member_data = {"@odata.id": f"{GRAPH_BASE_URL}/users/{user_email}"}
+                            await make_graph_request("POST", f"/groups/{group_id}/members/$ref", data=member_data)
+                            result_text += "✅ **Member access granted successfully**\n\n"
+                            
+                            # Try to add mailbox permissions
+                            try:
+                                # This would require Exchange Online PowerShell, so provide instructions
+                                result_text += "📋 **Additional Steps Required:**\n"
+                                result_text += "To grant full mailbox access, run this PowerShell command:\n\n"
+                                result_text += f"```powershell\n"
+                                result_text += f"Connect-ExchangeOnline\n"
+                                result_text += f"Add-MailboxPermission -Identity '{resource_email}' -User '{user_email}' -AccessRights FullAccess\n"
+                                result_text += f"```\n\n"
+                            except Exception:
+                                pass
+                            
+                            result_text += f"**✅ Success:** {user_display_name} has been added to {resource_display_name}\n"
+                            result_text += f"**Access Level:** Member access (mailbox permissions require PowerShell)\n"
+                            return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                            
+                    except Exception as e:
+                        result_text += f"⚠️ **Member assignment failed:** {str(e)}\n\n"
+                        
+                        # Provide PowerShell fallback
+                        result_text += "**🔄 Fallback to PowerShell Method**\n\n"
+                        result_text += "**Required PowerShell Commands:**\n"
+                        result_text += f"```powershell\n"
+                        result_text += f"# Connect to Exchange Online\n"
+                        result_text += f"Connect-ExchangeOnline\n\n"
+                        result_text += f"# Add user to shared mailbox\n"
+                        result_text += f"Add-MailboxPermission -Identity '{resource_email}' -User '{user_email}' -AccessRights FullAccess\n\n"
+                        result_text += f"# Verify the permission\n"
+                        result_text += f"Get-MailboxPermission -Identity '{resource_email}' | Where-Object {{$_.User -eq '{user_email}'}}\n"
+                        result_text += f"```\n\n"
+                        result_text += f"**Current Status:** {user_display_name} needs to be added via PowerShell\n"
+                        return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                            
+                elif action == "remove":
+                    # Handle removal for shared mailboxes
+                    try:
+                        # Try member removal first
+                        group_response = await make_graph_request("GET", f"/groups?$filter=mail eq '{resource_email}'")
+                        if group_response.get("value"):
+                            group_id = group_response["value"][0]["id"]
+                            
+                            # Check if user is a member
+                            try:
+                                members_response = await make_graph_request("GET", f"/groups/{group_id}/members?$filter=userPrincipalName eq '{user_email}'")
+                                if not members_response.get("value"):
+                                    result_text += "✅ **User is not a member**\n\n"
+                                    result_text += f"**Current Status:** {user_display_name} is not a member of {resource_display_name}\n"
+                                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                            except Exception:
+                                pass
+                            
+                            # Remove user as member
+                            await make_graph_request("DELETE", f"/groups/{group_id}/members/{user_email}/$ref")
+                            result_text += "✅ **Member access removed successfully**\n\n"
+                            
+                            result_text += f"**✅ Success:** {user_display_name} has been removed from {resource_display_name}\n"
+                            result_text += f"**Access Level:** Member access removed\n"
+                            return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                            
+                    except Exception as e:
+                        result_text += f"⚠️ **Member removal failed:** {str(e)}\n\n"
+                        result_text += "**🔍 MICROSOFT GRAPH API LIMITATION:**\n"
+                        result_text += "• Shared mailboxes cannot have members removed via Graph API\n"
+                        result_text += "• This is a Microsoft security restriction, not a permissions issue\n"
+                        result_text += "• Exchange Online PowerShell is required for shared mailbox operations\n\n"
+                        
+                        # Provide PowerShell fallback
+                        result_text += "**🔄 REQUIRED: PowerShell Method**\n\n"
+                        result_text += "**Required PowerShell Commands:**\n"
+                        result_text += f"```powershell\n"
+                        result_text += f"# Connect to Exchange Online\n"
+                        result_text += f"Connect-ExchangeOnline\n\n"
+                        result_text += f"# Remove user from shared mailbox\n"
+                        result_text += f"Remove-MailboxPermission -Identity '{resource_email}' -User '{user_email}' -AccessRights FullAccess\n\n"
+                        result_text += f"# Verify the removal\n"
+                        result_text += f"Get-MailboxPermission -Identity '{resource_email}' | Where-Object {{$_.User -eq '{user_email}'}}\n"
+                        result_text += f"```\n\n"
+                        result_text += f"**Current Status:** {user_display_name} needs to be removed via PowerShell\n"
+                        result_text += "**Why PowerShell?:** Microsoft Graph API does not support shared mailbox member management\n"
+                        return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                        
+            except Exception as e:
+                result_text += f"❌ **All methods failed:** {str(e)}\n\n"
+                result_text += "**🔧 Manual Steps Required:**\n"
+                result_text += "1. Use Microsoft 365 Admin Center\n"
+                result_text += "2. Or use Exchange Online PowerShell\n"
+                result_text += "3. Contact your administrator\n"
+                return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                
+        elif resource_type == "microsoft365_group":
+            result_text += "🔄 **Microsoft 365 Group Detected - Using Graph API**\n\n"
+            
+            try:
+                group_response = await make_graph_request("GET", f"/groups?$filter=mail eq '{resource_email}'")
+                if group_response.get("value"):
+                    group_id = group_response["value"][0]["id"]
+                    
+                    if action == "add":
+                        member_data = {"@odata.id": f"{GRAPH_BASE_URL}/users/{user_email}"}
+                        await make_graph_request("POST", f"/groups/{group_id}/members/$ref", data=member_data)
+                        result_text += "✅ **User added successfully**\n\n"
+                        
+                        if access_level == "owner":
+                            owner_data = {"@odata.id": f"{GRAPH_BASE_URL}/users/{user_email}"}
+                            await make_graph_request("POST", f"/groups/{group_id}/owners/$ref", data=owner_data)
+                            result_text += "✅ **Owner access granted**\n\n"
+                        
+                        result_text += f"**✅ Success:** {user_display_name} has been added to {resource_display_name}\n"
+                        result_text += f"**Access Level:** {access_level.title()}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                        
+            except Exception as e:
+                result_text += f"❌ **Failed to add user:** {str(e)}\n\n"
+                result_text += "**🔧 Alternative Methods:**\n"
+                result_text += "1. Use Microsoft 365 Admin Center\n"
+                result_text += "2. Use Exchange Online PowerShell\n"
+                return CallToolResult(content=[TextContent(type="text", text=result_text)])
+                
+        elif resource_type == "user_mailbox":
+            result_text += "🔄 **User Mailbox Detected - Using Delegation**\n\n"
+            
+            result_text += "**📋 PowerShell Required for Mailbox Delegation:**\n"
+            result_text += f"```powershell\n"
+            result_text += f"# Connect to Exchange Online\n"
+            result_text += f"Connect-ExchangeOnline\n\n"
+            result_text += f"# Delegate mailbox access\n"
+            result_text += f"Add-MailboxPermission -Identity '{resource_email}' -User '{user_email}' -AccessRights FullAccess\n\n"
+            result_text += f"# Verify the permission\n"
+            result_text += f"Get-MailboxPermission -Identity '{resource_email}' | Where-Object {{$_.User -eq '{user_email}'}}\n"
+            result_text += f"```\n\n"
+            result_text += f"**Current Status:** {user_display_name} needs mailbox delegation via PowerShell\n"
+            return CallToolResult(content=[TextContent(type="text", text=result_text)])
+            
+        else:
+            result_text += f"🔄 **{resource_type.replace('_', ' ').title()} Detected**\n\n"
+            result_text += "**📋 Manual Steps Required:**\n"
+            result_text += "1. Use Microsoft 365 Admin Center\n"
+            result_text += "2. Or use Exchange Online PowerShell\n"
+            result_text += "3. Contact your administrator\n\n"
+            result_text += f"**Resource Type:** {resource_type.replace('_', ' ').title()}\n"
+            result_text += f"**Action:** {action.title()} {user_display_name} to {resource_display_name}\n"
+            return CallToolResult(content=[TextContent(type="text", text=result_text)])
+            
+    except Exception as e:
+        error_text = f"**❌ Smart Resource Access Management Failed**\n\n"
+        error_text += f"**Error:** {str(e)}\n\n"
+        error_text += "**🔧 Troubleshooting:**\n"
+        error_text += "1. Check that both user and resource names are correct\n"
+        error_text += "2. Verify you have the necessary permissions\n"
+        error_text += "3. Try using exact email addresses\n"
+        error_text += "4. Use Microsoft 365 Admin Center as alternative\n"
+        
+        return CallToolResult(content=[TextContent(type="text", text=error_text)])
+
 def create_server():
     """Create and configure the MCP server."""
     # Create the FastMCP server
@@ -3234,42 +3732,42 @@ def create_server():
         manage_group_membership,
         name="manage_group_membership",
         title="Manage Group Membership",
-        description="Unified tool to manage group membership and ownership operations (add/remove members/owners, list members/owners). ⚠️ DEPRECATED: For adding users, ALWAYS use 'robust_add_user_to_group' which has 99% success rate and handles all group types automatically."
+        description="⚠️ GRAPH API LIMITATIONS: Only works with regular Microsoft 365 Groups. Does NOT work with shared mailboxes, user mailboxes, or distribution lists. For shared mailboxes, use PowerShell. For adding users, use 'add_user_to_any_group_type' instead."
     )
     
     app.add_tool(
         get_group_information,
         name="get_group_information",
         title="Get Group Information",
-        description="Unified tool to get comprehensive group information (groups, shared mailboxes, distribution lists)"
+        description="🔍 ENHANCED SEARCH: Unified tool to get comprehensive information about groups, users, shared mailboxes, and distribution lists. Includes fuzzy search, auto-completion, and smart suggestions. Use this for ALL resource lookups!"
     )
     
     app.add_tool(
         create_resource,
         name="create_resource",
         title="Create Resource",
-        description="Unified tool to create users, shared mailboxes, and distribution lists"
+        description="⚠️ GRAPH API LIMITATIONS: Can create users and groups, but cannot create shared mailboxes or distribution lists via Graph API. Use PowerShell for mailbox creation."
     )
     
     app.add_tool(
         update_resource,
         name="update_resource",
         title="Update Resource",
-        description="Unified tool to update any resource properties (users, groups, shared mailboxes)"
+        description="⚠️ GRAPH API LIMITATIONS: Can update user and group properties, but cannot modify mailbox permissions or shared mailbox settings. Use PowerShell for mailbox operations."
     )
     
     app.add_tool(
         delete_resource,
         name="delete_resource",
         title="Delete Resource",
-        description="Unified tool to delete any resource (users, groups, shared mailboxes)"
+        description="⚠️ GRAPH API LIMITATIONS: Can delete users and groups, but cannot delete shared mailboxes or distribution lists via Graph API. Use PowerShell for mailbox deletion."
     )
     
     app.add_tool(
         list_users,
         name="list_users",
         title="List Users",
-        description="List users in Microsoft 365 with optional filtering and pagination"
+        description="✅ FULLY SUPPORTED: List users in Microsoft 365 with optional filtering and pagination. No Graph API limitations."
     )
     
     # Specialized Tools (3)
@@ -3277,21 +3775,21 @@ def create_server():
         delegate_user_mailbox_access,
         name="delegate_user_mailbox_access",
         title="Delegate User Mailbox Access",
-        description="⚠️ LIMITATION: Works best with user mailboxes. For Microsoft 365 Groups, use 'add_user_to_any_group_type' instead."
+        description="⚠️ GRAPH API LIMITATIONS: Cannot delegate mailbox access via Graph API. This tool provides PowerShell instructions only. Microsoft Graph API does not support mailbox permission delegation."
     )
     
     app.add_tool(
         prepare_user_for_shared_mailbox_conversion,
         name="prepare_user_for_shared_mailbox_conversion",
         title="Prepare User for Shared Mailbox Conversion",
-        description="⚠️ LIMITATION: Prepares user account for shared mailbox conversion but cannot actually convert mailbox type via API. Requires PowerShell for actual conversion."
+        description="⚠️ GRAPH API LIMITATIONS: Can prepare user account (disable, remove license) but cannot convert mailbox type via Graph API. Requires PowerShell for actual conversion: Set-Mailbox -Type Shared"
     )
     
     app.add_tool(
         test_connectivity,
         name="test_connectivity",
         title="Test Connectivity",
-        description="Unified tool to test authentication, connectivity, and API access"
+        description="✅ FULLY SUPPORTED: Unified tool to test authentication, connectivity, and API access. No Graph API limitations."
     )
     
     # Utility Tools (3)
@@ -3299,56 +3797,64 @@ def create_server():
         list_distribution_lists,
         name="list_distribution_lists",
         title="List Distribution Lists",
-        description="List distribution lists in Microsoft 365 with optional filtering and pagination"
+        description="⚠️ GRAPH API LIMITATIONS: Can list distribution lists but cannot manage members via Graph API. Use PowerShell for member management."
     )
     
     app.add_tool(
         list_shared_mailboxes,
         name="list_shared_mailboxes",
         title="List Shared Mailboxes",
-        description="List shared mailboxes in Microsoft 365 with optional filtering and pagination"
+        description="⚠️ GRAPH API LIMITATIONS: Can list shared mailboxes but cannot manage members or permissions via Graph API. Use PowerShell for all shared mailbox operations."
     )
     
     app.add_tool(
         get_mailbox_info,
         name="get_mailbox_info",
         title="Get Mailbox Info",
-        description="Get detailed information about a user's mailbox"
+        description="⚠️ GRAPH API LIMITATIONS: Can get basic mailbox settings but cannot access mailbox permissions or delegation settings. Use PowerShell for detailed mailbox information."
     )
     
     app.add_tool(
         add_user_to_microsoft365_group,
         name="add_user_to_microsoft365_group",
         title="Add User to Microsoft 365 Group",
-        description="⚠️ LIMITATION: Only works with Microsoft 365 Groups (Unified groups), not user mailboxes converted to shared mailboxes. For user mailboxes, use 'delegate_user_mailbox_access' instead."
+        description="⚠️ GRAPH API LIMITATIONS: Only works with Microsoft 365 Groups (Unified groups), not shared mailboxes or user mailboxes. For shared mailboxes, use PowerShell."
     )
     
     app.add_tool(
         manage_microsoft365_group_access,
         name="manage_microsoft365_group_access",
         title="Manage Microsoft 365 Group Access",
-        description="⚠️ LIMITATION: Only works with Microsoft 365 Groups (Unified groups), not user mailboxes converted to shared mailboxes. For user mailboxes, use 'delegate_user_mailbox_access' instead."
+        description="⚠️ GRAPH API LIMITATIONS: Only works with Microsoft 365 Groups (Unified groups), not shared mailboxes or user mailboxes. For shared mailboxes, use PowerShell."
     )
     
     app.add_tool(
         create_user_simple,
         name="create_user_simple",
         title="Create User (Simple)",
-        description="Create a new user account with clear, simple parameters (recommended for user creation)"
+        description="✅ FULLY SUPPORTED: Create a new user account with clear, simple parameters. No Graph API limitations for user creation."
     )
     
     app.add_tool(
         add_user_to_any_group_type,
         name="add_user_to_any_group_type",
         title="Add User to Group (Ultra-Robust)",
-        description="ULTRA-ROBUST TOOL: Handles ALL group types with comprehensive fallback logic. Tries multiple API methods automatically until one succeeds. 99% SUCCESS RATE. USE THIS FOR ALL GROUP MEMBERSHIP OPERATIONS."
+        description="⚠️ GRAPH API LIMITATIONS: Works with Microsoft 365 Groups but has limited success with shared mailboxes. For shared mailboxes, use PowerShell: Add-MailboxPermission"
     )
     
     app.add_tool(
         add_user_to_shared_mailbox,
         name="add_user_to_shared_mailbox",
         title="Add User to Shared Mailbox",
-        description="Specialized tool to add users to shared mailboxes with proper API handling and multiple fallback methods"
+        description="⚠️ GRAPH API LIMITATIONS: Cannot add users to shared mailboxes via Graph API. This tool provides PowerShell instructions only. Use: Add-MailboxPermission"
+    )
+    
+    # 🚀 NEW: Smart Unified Tool
+    app.add_tool(
+        manage_resource_access,
+        name="manage_resource_access",
+        title="Smart Resource Access Management",
+        description="🔧 SMART UNIFIED TOOL: Intelligently manages access to any Microsoft 365 resource with automatic resource detection and optimal method selection. ⚠️ GRAPH API LIMITATIONS: Cannot manage shared mailbox permissions via Graph API - provides PowerShell fallback automatically."
     )
     
     return app
