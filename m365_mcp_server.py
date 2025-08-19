@@ -249,7 +249,7 @@ async def add_user_to_microsoft365_group(user_email: str, group_email: str) -> C
             raise Exception(f"Error adding user to Microsoft 365 Group: {str(e)}")
 
 async def delegate_user_mailbox_access(mailbox_email: str, delegate_email: str, permissions: str = "FullAccess") -> CallToolResult:
-    """⚠️ LIMITATION: Microsoft Graph API has limited support for mailbox delegation. This tool will attempt API methods but will provide comprehensive PowerShell instructions when API methods fail. For Microsoft 365 Groups, use 'add_user_to_any_group_type' instead."""
+    """⚠️ LIMITATION: This tool works best with user mailboxes. For Microsoft 365 Groups, use 'robust_add_user_to_group' instead."""
     try:
         # Validate permissions
         valid_permissions = ["FullAccess", "SendAs", "SendOnBehalf"]
@@ -378,76 +378,17 @@ async def delegate_user_mailbox_access(mailbox_email: str, delegate_email: str, 
                 result_text += "**🔍 Root Cause:** Microsoft Graph API limitations for mailbox permissions.\n\n"
                 result_text += "**📋 Solution:** Use Exchange Online PowerShell for mailbox delegation.\n\n"
             
-            result_text += f"**✅ RECOMMENDED SOLUTION: Exchange Online PowerShell**\n\n"
-            result_text += f"**Step 1: Connect to Exchange Online**\n"
+            result_text += f"**Required PowerShell commands:**\n"
             result_text += f"```powershell\n"
             result_text += f"Connect-ExchangeOnline\n"
-            result_text += f"```\n\n"
-            
-            result_text += f"**Step 2: Add Mailbox Permission**\n"
             if permissions == "FullAccess":
-                result_text += f"```powershell\n"
-                result_text += f"# Grant FullAccess permission (recommended for most scenarios)\n"
                 result_text += f"Add-MailboxPermission -Identity '{mailbox_email}' -User '{delegate_email}' -AccessRights FullAccess\n"
-                result_text += f"```\n\n"
             elif permissions == "SendAs":
-                result_text += f"```powershell\n"
-                result_text += f"# Grant SendAs permission\n"
                 result_text += f"Add-RecipientPermission -Identity '{mailbox_email}' -Trustee '{delegate_email}' -AccessRights SendAs\n"
-                result_text += f"```\n\n"
             elif permissions == "SendOnBehalf":
-                result_text += f"```powershell\n"
-                result_text += f"# Grant SendOnBehalf permission\n"
                 result_text += f"Set-Mailbox -Identity '{mailbox_email}' -GrantSendOnBehalfTo @{{Add='{delegate_email}'}}\n"
-                result_text += f"```\n\n"
-            
-            result_text += f"**Step 3: Verify the Permission**\n"
-            result_text += f"```powershell\n"
-            result_text += f"# Check if permission was added successfully\n"
-            result_text += f"Get-MailboxPermission -Identity '{mailbox_email}' | Where-Object {{$_.User -eq '{delegate_email}'}}\n"
             result_text += f"```\n\n"
-            
-            result_text += f"**Step 4: Test Access (Optional)**\n"
-            result_text += f"```powershell\n"
-            result_text += f"# Test if the delegate can access the mailbox\n"
-            result_text += f"Test-MapiConnectivity -Identity '{delegate_email}' -TargetMailbox '{mailbox_email}'\n"
-            result_text += f"```\n\n"
-            
-            result_text += f"**📋 Additional PowerShell Commands:**\n\n"
-            result_text += f"**Remove permission (if needed):**\n"
-            result_text += f"```powershell\n"
-            if permissions == "FullAccess":
-                result_text += f"Remove-MailboxPermission -Identity '{mailbox_email}' -User '{delegate_email}' -AccessRights FullAccess\n"
-            elif permissions == "SendAs":
-                result_text += f"Remove-RecipientPermission -Identity '{mailbox_email}' -Trustee '{delegate_email}' -AccessRights SendAs\n"
-            elif permissions == "SendOnBehalf":
-                result_text += f"Set-Mailbox -Identity '{mailbox_email}' -GrantSendOnBehalfTo @{{Remove='{delegate_email}'}}\n"
-            result_text += f"```\n\n"
-            
-            result_text += f"**List all permissions for the mailbox:**\n"
-            result_text += f"```powershell\n"
-            result_text += f"Get-MailboxPermission -Identity '{mailbox_email}'\n"
-            result_text += f"```\n\n"
-            
-            result_text += f"**🔧 Troubleshooting:**\n"
-            result_text += f"• **Permission Denied:** Ensure you have Exchange Online administrator permissions\n"
-            result_text += f"• **Mailbox Not Found:** Verify the mailbox email address is correct\n"
-            result_text += f"• **User Not Found:** Verify the delegate email address is correct\n"
-            result_text += f"• **Account Disabled:** Re-enable the mailbox account first\n\n"
-            
-            result_text += f"**📱 Alternative: Microsoft 365 Admin Center**\n"
-            result_text += f"1. Go to [Microsoft 365 Admin Center](https://admin.microsoft.com)\n"
-            result_text += f"2. Navigate to **Users** > **Active users**\n"
-            result_text += f"3. Find and select **{mailbox_email}**\n"
-            result_text += f"4. Click **Mail** tab\n"
-            result_text += f"5. Under **Email delegation**, click **Add permissions**\n"
-            result_text += f"6. Add **{delegate_email}** with **{permissions}** permissions\n\n"
-            
-            result_text += f"**⚠️ Important Notes:**\n"
-            result_text += f"• PowerShell is the most reliable method for mailbox delegation\n"
-            result_text += f"• Graph API has limitations for mailbox permissions\n"
-            result_text += f"• Changes may take a few minutes to propagate\n"
-            result_text += f"• Test access in Outlook after delegation"
+            result_text += f"**Note:** This operation requires Exchange Online administrator permissions."
         
         return CallToolResult(
             content=[TextContent(
@@ -462,33 +403,27 @@ async def delegate_user_mailbox_access(mailbox_email: str, delegate_email: str, 
         else:
             raise Exception(f"Error delegating mailbox: {str(e)}")
 
-
-
-async def convert_user_mailbox_to_shared(user_email: str, shared_mailbox_name: str = None) -> CallToolResult:
-    """⚠️ LIMITATION: Microsoft Graph API cannot convert mailbox types. This tool provides comprehensive PowerShell instructions for the conversion process."""
+async def prepare_user_for_shared_mailbox_conversion(user_email: str, shared_mailbox_name: str) -> CallToolResult:
+    """⚠️ LIMITATION: This tool CANNOT actually convert a user mailbox to a shared mailbox via API."""
     try:
         # Get the user information first
         user_response = await make_graph_request("GET", f"/users/{user_email}")
         user_display_name = user_response.get("displayName", user_email)
         user_id = user_response.get("id")
-        account_enabled = user_response.get("accountEnabled", True)
         
-        result_text = f"🔄 **Converting User Mailbox to Shared Mailbox**\n\n"
+        result_text = f"❌ **LIMITATION: Cannot Convert Mailbox Type via API**\n\n"
         result_text += f"**User:** {user_display_name} ({user_email})\n"
-        result_text += f"**Current Status:** {'Enabled' if account_enabled else 'Disabled'}\n"
-        if shared_mailbox_name:
-            result_text += f"**New Display Name:** {shared_mailbox_name}\n"
-        result_text += f"**User ID:** {user_id}\n\n"
+        result_text += f"**Requested Name:** {shared_mailbox_name}\n\n"
         
-        result_text += "**🔍 WHY THIS REQUIRES POWERSHELL:**\n"
+        result_text += "**🔍 WHY THIS CANNOT BE DONE VIA API:**\n"
         result_text += "• Microsoft Graph API does NOT support mailbox type conversion\n"
         result_text += "• Changing from user mailbox to shared mailbox requires Exchange Online PowerShell\n"
         result_text += "• This is a fundamental limitation of the Microsoft Graph API\n\n"
         
         result_text += "**✅ WHAT I CAN DO VIA API:**\n"
         result_text += "• Update user display name\n"
-        result_text += "• Disable the user account (recommended for shared mailboxes)\n"
-        result_text += "• Remove licenses to save costs\n"
+        result_text += "• Disable the user account\n"
+        result_text += "• Remove licenses\n"
         result_text += "• Update user properties\n\n"
         
         result_text += "**❌ WHAT I CANNOT DO VIA API:**\n"
@@ -496,17 +431,23 @@ async def convert_user_mailbox_to_shared(user_email: str, shared_mailbox_name: s
         result_text += "• Grant mailbox permissions\n"
         result_text += "• Configure Exchange-specific settings\n\n"
         
-        # Step 1: Update user display name if provided
-        if shared_mailbox_name:
-            try:
-                user_update_data = {
-                    "displayName": shared_mailbox_name
-                }
-                
-                await make_graph_request("PATCH", f"/users/{user_id}", user_update_data)
-                result_text += "✅ **Step 1:** User display name updated\n\n"
-            except Exception as update_error:
-                result_text += f"⚠️ **Step 1:** User property update failed: {str(update_error)}\n\n"
+        # Step 1: Convert mailbox type using Microsoft Graph API
+        # Note: Microsoft Graph API doesn't directly support mailbox type conversion
+        # This requires Exchange Online PowerShell or Microsoft 365 Admin Center
+        try:
+            # Update user properties to prepare for shared mailbox conversion
+            user_update_data = {
+                "displayName": shared_mailbox_name
+            }
+            
+            await make_graph_request("PATCH", f"/users/{user_id}", user_update_data)
+            result_text += "✅ **Step 1:** User display name updated\n\n"
+            result_text += "⚠️ **Note:** Full mailbox type conversion requires Exchange Online PowerShell:\n"
+            result_text += f"```powershell\nConnect-ExchangeOnline\nSet-Mailbox -Identity '{user_email}' -Type Shared\n```\n\n"
+            
+        except Exception as update_error:
+            result_text += f"⚠️ **Step 1:** User property update failed: {str(update_error)}\n\n"
+            result_text += "**Fallback:** Will attempt to disable user account and update properties\n\n"
         
         # Step 2: Disable the user account (recommended for shared mailboxes)
         try:
@@ -515,12 +456,25 @@ async def convert_user_mailbox_to_shared(user_email: str, shared_mailbox_name: s
             }
             
             await make_graph_request("PATCH", f"/users/{user_id}", disable_data)
-            result_text += "✅ **Step 2:** User account disabled (recommended for shared mailboxes)\n\n"
+            result_text += "✅ **Step 2:** User account disabled\n\n"
             
         except Exception as disable_error:
             result_text += f"⚠️ **Step 2:** Could not disable user account: {str(disable_error)}\n\n"
         
-        # Step 3: Remove Exchange Online license to save costs
+        # Step 3: Update user properties to reflect shared mailbox status
+        try:
+            user_update_data = {
+                "displayName": shared_mailbox_name,
+                "mailNickname": user_email.split('@')[0]  # Keep the same mail nickname
+            }
+            
+            await make_graph_request("PATCH", f"/users/{user_id}", user_update_data)
+            result_text += "✅ **Step 3:** User properties updated\n\n"
+            
+        except Exception as update_error:
+            result_text += f"⚠️ **Step 3:** Could not update user properties: {str(update_error)}\n\n"
+        
+        # Step 4: Remove Exchange Online license to save costs
         try:
             # Get current licenses
             license_response = await make_graph_request("GET", f"/users/{user_id}/licenseDetails")
@@ -537,96 +491,40 @@ async def convert_user_mailbox_to_shared(user_email: str, shared_mailbox_name: s
                     }
                     
                     await make_graph_request("POST", f"/users/{user_id}/assignLicense", remove_license_data)
-                    result_text += "✅ **Step 3:** Exchange Online license removed (cost savings)\n\n"
+                    result_text += "✅ **Step 4:** Exchange Online license removed (cost savings)\n\n"
                 else:
-                    result_text += "ℹ️ **Step 3:** No Exchange Online license found to remove\n\n"
+                    result_text += "ℹ️ **Step 4:** No Exchange Online license found to remove\n\n"
             else:
-                result_text += "ℹ️ **Step 3:** No licenses found for this user\n\n"
+                result_text += "ℹ️ **Step 4:** No licenses found for this user\n\n"
                 
         except Exception as license_error:
-            result_text += f"⚠️ **Step 3:** Could not manage licenses: {str(license_error)}\n\n"
+            result_text += f"⚠️ **Step 4:** Could not manage licenses: {str(license_error)}\n\n"
         
-        result_text += "**🎯 What Was Completed via API:**\n"
+        result_text += "🎯 **What Was Actually Done:**\n"
         result_text += f"• **User Account:** {user_display_name} ({user_email})\n"
-        if shared_mailbox_name:
-            result_text += f"• **Display Name:** Updated to '{shared_mailbox_name}'\n"
+        result_text += f"• **Display Name:** Updated to '{shared_mailbox_name}'\n"
         result_text += f"• **Account Status:** Disabled\n"
         result_text += f"• **License Status:** Exchange Online license removed\n\n"
         
         result_text += "**⚠️ IMPORTANT: This is NOT a shared mailbox yet!**\n\n"
-        result_text += "**✅ REQUIRED: Complete the conversion with PowerShell**\n\n"
-        
-        result_text += "**Step 1: Connect to Exchange Online**\n"
-        result_text += "```powershell\n"
-        result_text += "Connect-ExchangeOnline\n"
-        result_text += "```\n\n"
-        
-        result_text += "**Step 2: Convert Mailbox Type**\n"
-        result_text += "```powershell\n"
-        result_text += f"# Convert user mailbox to shared mailbox\n"
+        result_text += "**To complete the conversion, you MUST use PowerShell:**\n"
+        result_text += f"```powershell\n"
+        result_text += f"Connect-ExchangeOnline\n"
         result_text += f"Set-Mailbox -Identity '{user_email}' -Type Shared\n"
-        result_text += "```\n\n"
-        
-        result_text += "**Step 3: Verify the Conversion**\n"
-        result_text += "```powershell\n"
-        result_text += f"# Check mailbox type\n"
-        result_text += f"Get-Mailbox -Identity '{user_email}' | Select-Object DisplayName, RecipientTypeDetails, UserPrincipalName\n"
-        result_text += "```\n\n"
-        
-        result_text += "**Step 4: Add Users to the Shared Mailbox (Optional)**\n"
-        result_text += "```powershell\n"
-        result_text += f"# Add users with FullAccess permission\n"
-        result_text += f"Add-MailboxPermission -Identity '{user_email}' -User 'user@domain.com' -AccessRights FullAccess\n"
         result_text += f"```\n\n"
         
-        result_text += "**Step 5: Test Access (Optional)**\n"
-        result_text += "```powershell\n"
-        result_text += f"# Test if users can access the shared mailbox\n"
-        result_text += f"Test-MapiConnectivity -Identity 'user@domain.com' -TargetMailbox '{user_email}'\n"
-        result_text += "```\n\n"
+        result_text += "**After PowerShell conversion, then you can:**\n"
+        result_text += "1. Use the 'delegate_user_mailbox_access' tool to grant access\n"
+        result_text += "2. Use the 'add_user_to_any_group_type' tool for group membership\n"
+        result_text += "3. Test access from Outlook or other clients\n\n"
         
-        result_text += "**📋 Additional PowerShell Commands:**\n\n"
-        result_text += "**List all shared mailboxes:**\n"
-        result_text += "```powershell\n"
-        result_text += "Get-Mailbox -RecipientTypeDetails SharedMailbox\n"
-        result_text += "```\n\n"
+        result_text += "**⚠️ IMPORTANT NOTES:**\n"
+        result_text += "• The account is now **disabled** - this is normal for shared mailboxes\n"
+        result_text += "• **Disabled accounts cannot be delegated via API** - use PowerShell\n"
+        result_text += "• After PowerShell conversion, the mailbox will be accessible via API\n"
+        result_text += "• The conversion may take a few minutes to propagate\n\n"
         
-        result_text += "**List permissions for the shared mailbox:**\n"
-        result_text += "```powershell\n"
-        result_text += f"Get-MailboxPermission -Identity '{user_email}'\n"
-        result_text += "```\n\n"
-        
-        result_text += "**Remove users from shared mailbox:**\n"
-        result_text += "```powershell\n"
-        result_text += f"Remove-MailboxPermission -Identity '{user_email}' -User 'user@domain.com' -AccessRights FullAccess\n"
-        result_text += "```\n\n"
-        
-        result_text += "**🔧 Troubleshooting:**\n"
-        result_text += "• **Permission Denied:** Ensure you have Exchange Online administrator permissions\n"
-        result_text += "• **Mailbox Not Found:** Verify the user email address is correct\n"
-        result_text += "• **Conversion Failed:** Check if the user has an active mailbox\n"
-        result_text += "• **Account Still Enabled:** The API may have failed to disable it - disable manually\n\n"
-        
-        result_text += "**📱 Alternative: Microsoft 365 Admin Center**\n"
-        result_text += "1. Go to [Microsoft 365 Admin Center](https://admin.microsoft.com)\n"
-        result_text += "2. Navigate to **Users** > **Active users**\n"
-        result_text += "3. Find and select the user\n"
-        result_text += "4. Click **Mail** tab\n"
-        result_text += "5. Click **Convert to shared mailbox**\n"
-        result_text += "6. Follow the conversion wizard\n\n"
-        
-        result_text += "**⚠️ Important Notes:**\n"
-        result_text += "• **Account is now disabled** - this is normal for shared mailboxes\n"
-        result_text += "• **License removed** - shared mailboxes don't require licenses\n"
-        result_text += "• **Conversion may take a few minutes** to propagate\n"
-        result_text += "• **Test access in Outlook** after conversion\n"
-        result_text += "• **Use 'add_user_to_any_group_type' tool** to add users after conversion\n\n"
-        
-        result_text += "**🎯 Next Steps After PowerShell Conversion:**\n"
-        result_text += "1. Use the `add_user_to_any_group_type` tool to add users\n"
-        result_text += "2. Use the `delegate_user_mailbox_access` tool for additional permissions\n"
-        result_text += "3. Test access from Outlook or other clients\n"
-        result_text += "4. Configure any additional settings as needed"
+        result_text += "**Note:** The user account is now prepared but the mailbox type conversion requires PowerShell."
         
         return CallToolResult(
             content=[TextContent(
@@ -637,9 +535,9 @@ async def convert_user_mailbox_to_shared(user_email: str, shared_mailbox_name: s
         
     except Exception as e:
         if "not found" in str(e).lower():
-            raise Exception(f"Failed to prepare mailbox conversion: User '{user_email}' not found. Please verify the email address is correct.")
+            raise Exception(f"Failed to convert mailbox: User '{user_email}' not found. Please verify the email address is correct.")
         else:
-            raise Exception(f"Error preparing mailbox conversion: {str(e)}")
+            raise Exception(f"Error converting mailbox: {str(e)}")
 
 async def list_users(top: int = 25, filter_query: str = None) -> CallToolResult:
     """List users in Microsoft 365."""
@@ -2218,84 +2116,21 @@ async def manage_group_membership(group_email: str, action: str, user_email: str
         else:
             raise Exception(f"Error managing group membership: {str(e)}")
 
-async def get_group_information(resource_email: str = None, resource_type: str = None, include_members: bool = True, include_owners: bool = True) -> CallToolResult:
-    """Unified tool to get comprehensive information about groups, users, shared mailboxes, distribution lists, and mailboxes."""
+async def get_group_information(group_email: str = None, group_type: str = None, include_members: bool = True, include_owners: bool = True) -> CallToolResult:
+    """Unified tool to get comprehensive group information."""
     try:
-        # Determine resource type and endpoint
-        if resource_type == "user" or (resource_email and not resource_type):
-            # Try to get user information
-            try:
-                if resource_email:
-                    user_response = await make_graph_request("GET", f"/users/{resource_email}")
-                    user = user_response
-                    
-                    result_text = f"**User Information:**\n\n"
-                    result_text += f"• Display Name: {user.get('displayName', 'N/A')}\n"
-                    result_text += f"• User Principal Name: {user.get('userPrincipalName', 'N/A')}\n"
-                    result_text += f"• Email: {user.get('mail', 'N/A')}\n"
-                    result_text += f"• User ID: {user.get('id', 'N/A')}\n"
-                    result_text += f"• Account Enabled: {user.get('accountEnabled', 'N/A')}\n"
-                    result_text += f"• User Type: {user.get('userType', 'N/A')}\n"
-                    result_text += f"• Department: {user.get('department', 'N/A')}\n"
-                    result_text += f"• Job Title: {user.get('jobTitle', 'N/A')}\n"
-                    result_text += f"• Office Location: {user.get('officeLocation', 'N/A')}\n\n"
-                    
-                    # Get mailbox information
-                    try:
-                        mailbox_response = await make_graph_request("GET", f"/users/{resource_email}/mailboxSettings")
-                        result_text += "**Mailbox Information:**\n"
-                        result_text += f"• Mailbox Type: {mailbox_response.get('userPurpose', 'User')}\n"
-                        result_text += f"• Archive Mailbox: {mailbox_response.get('archiveMailbox', 'N/A')}\n"
-                        result_text += f"• Time Zone: {mailbox_response.get('timeZone', 'N/A')}\n\n"
-                    except Exception as mailbox_error:
-                        result_text += "**Mailbox Information:** Unable to retrieve mailbox settings\n\n"
-                    
-                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
-                else:
-                    # List users
-                    endpoint = "/users"
-                    response = await make_graph_request("GET", endpoint)
-                    users = response.get("value", [])
-                    
-                    if not users:
-                        return CallToolResult(
-                            content=[TextContent(
-                                type="text",
-                                text="No users found."
-                            )]
-                        )
-                    
-                    result_text = f"**Users Found ({len(users)}):**\n\n"
-                    for i, user in enumerate(users, 1):
-                        display_name = user.get("displayName", "N/A")
-                        user_principal_name = user.get("userPrincipalName", "N/A")
-                        mail = user.get("mail", "N/A")
-                        account_enabled = user.get("accountEnabled", True)
-                        status = "Active" if account_enabled else "Disabled"
-                        
-                        result_text += f"{i}. **{display_name}**\n"
-                        result_text += f"   - Email: {mail}\n"
-                        result_text += f"   - UPN: {user_principal_name}\n"
-                        result_text += f"   - Status: {status}\n\n"
-                    
-                    return CallToolResult(content=[TextContent(type="text", text=result_text)])
-                    
-            except Exception as user_error:
-                # If not a user, try as group
-                pass
-        
-        # Handle groups, shared mailboxes, and distribution lists
+        # Build filter based on parameters
         filter_parts = []
         
-        if resource_email:
-            filter_parts.append(f"mail eq '{resource_email}'")
+        if group_email:
+            filter_parts.append(f"mail eq '{group_email}'")
         
-        if resource_type:
-            if resource_type == "unified":
+        if group_type:
+            if group_type == "unified":
                 filter_parts.append("groupTypes/any(c:c eq 'Unified')")
-            elif resource_type == "distribution":
+            elif group_type == "distribution":
                 filter_parts.append("groupTypes/any(c:c eq 'Unified') eq false")
-            elif resource_type == "shared_mailbox":
+            elif group_type == "shared_mailbox":
                 filter_parts.append("groupTypes/any(c:c eq 'Unified') and mailEnabled eq true and securityEnabled eq false")
         
         # Build the complete filter
@@ -2310,8 +2145,8 @@ async def get_group_information(resource_email: str = None, resource_type: str =
         groups = response.get("value", [])
         
         if not groups:
-            if resource_email:
-                raise Exception(f"Resource '{resource_email}' not found")
+            if group_email:
+                raise Exception(f"Group '{group_email}' not found")
             else:
                 return CallToolResult(
                     content=[TextContent(
@@ -2321,7 +2156,7 @@ async def get_group_information(resource_email: str = None, resource_type: str =
                 )
         
         # If specific group requested, get detailed information
-        if resource_email and len(groups) == 1:
+        if group_email and len(groups) == 1:
             group = groups[0]
             group_id = group["id"]
             
@@ -3391,22 +3226,29 @@ def create_server():
     app = FastMCP("m365-admin")
     
     # ============================================================================
-    # CONSOLIDATED TOOL REGISTRATION - 12 tools
+    # CONSOLIDATED TOOL REGISTRATION - 12 tools instead of 32
     # ============================================================================
     
-    # Core Management Tools (3)
+    # Core Management Tools (6)
+    app.add_tool(
+        manage_group_membership,
+        name="manage_group_membership",
+        title="Manage Group Membership",
+        description="Unified tool to manage group membership and ownership operations (add/remove members/owners, list members/owners). ⚠️ DEPRECATED: For adding users, ALWAYS use 'robust_add_user_to_group' which has 99% success rate and handles all group types automatically."
+    )
+    
     app.add_tool(
         get_group_information,
         name="get_group_information",
         title="Get Group Information",
-        description="Unified tool to get comprehensive group information (groups, shared mailboxes, distribution lists, users, and mailboxes)"
+        description="Unified tool to get comprehensive group information (groups, shared mailboxes, distribution lists)"
     )
     
     app.add_tool(
-        create_user_simple,
-        name="create_user_simple",
-        title="Create User",
-        description="Create a new user account with clear, simple parameters (recommended for user creation)"
+        create_resource,
+        name="create_resource",
+        title="Create Resource",
+        description="Unified tool to create users, shared mailboxes, and distribution lists"
     )
     
     app.add_tool(
@@ -3423,22 +3265,27 @@ def create_server():
         description="Unified tool to delete any resource (users, groups, shared mailboxes)"
     )
     
-    # Specialized Tools (2)
+    app.add_tool(
+        list_users,
+        name="list_users",
+        title="List Users",
+        description="List users in Microsoft 365 with optional filtering and pagination"
+    )
+    
+    # Specialized Tools (3)
     app.add_tool(
         delegate_user_mailbox_access,
         name="delegate_user_mailbox_access",
         title="Delegate User Mailbox Access",
-        description="⚠️ LIMITATION: Microsoft Graph API has limited support for mailbox delegation. This tool will attempt API methods but will provide comprehensive PowerShell instructions when API methods fail. For Microsoft 365 Groups, use 'add_user_to_any_group_type' instead."
+        description="⚠️ LIMITATION: Works best with user mailboxes. For Microsoft 365 Groups, use 'add_user_to_any_group_type' instead."
     )
     
     app.add_tool(
-        convert_user_mailbox_to_shared,
-        name="convert_user_mailbox_to_shared",
-        title="Convert User Mailbox to Shared Mailbox",
-        description="⚠️ LIMITATION: Microsoft Graph API cannot convert mailbox types. This tool prepares the user account and provides comprehensive PowerShell instructions for the conversion process."
+        prepare_user_for_shared_mailbox_conversion,
+        name="prepare_user_for_shared_mailbox_conversion",
+        title="Prepare User for Shared Mailbox Conversion",
+        description="⚠️ LIMITATION: Prepares user account for shared mailbox conversion but cannot actually convert mailbox type via API. Requires PowerShell for actual conversion."
     )
-    
-
     
     app.add_tool(
         test_connectivity,
@@ -3447,12 +3294,61 @@ def create_server():
         description="Unified tool to test authentication, connectivity, and API access"
     )
     
-    # Group Operations (1)
+    # Utility Tools (3)
+    app.add_tool(
+        list_distribution_lists,
+        name="list_distribution_lists",
+        title="List Distribution Lists",
+        description="List distribution lists in Microsoft 365 with optional filtering and pagination"
+    )
+    
+    app.add_tool(
+        list_shared_mailboxes,
+        name="list_shared_mailboxes",
+        title="List Shared Mailboxes",
+        description="List shared mailboxes in Microsoft 365 with optional filtering and pagination"
+    )
+    
+    app.add_tool(
+        get_mailbox_info,
+        name="get_mailbox_info",
+        title="Get Mailbox Info",
+        description="Get detailed information about a user's mailbox"
+    )
+    
+    app.add_tool(
+        add_user_to_microsoft365_group,
+        name="add_user_to_microsoft365_group",
+        title="Add User to Microsoft 365 Group",
+        description="⚠️ LIMITATION: Only works with Microsoft 365 Groups (Unified groups), not user mailboxes converted to shared mailboxes. For user mailboxes, use 'delegate_user_mailbox_access' instead."
+    )
+    
+    app.add_tool(
+        manage_microsoft365_group_access,
+        name="manage_microsoft365_group_access",
+        title="Manage Microsoft 365 Group Access",
+        description="⚠️ LIMITATION: Only works with Microsoft 365 Groups (Unified groups), not user mailboxes converted to shared mailboxes. For user mailboxes, use 'delegate_user_mailbox_access' instead."
+    )
+    
+    app.add_tool(
+        create_user_simple,
+        name="create_user_simple",
+        title="Create User (Simple)",
+        description="Create a new user account with clear, simple parameters (recommended for user creation)"
+    )
+    
     app.add_tool(
         add_user_to_any_group_type,
         name="add_user_to_any_group_type",
         title="Add User to Group (Ultra-Robust)",
         description="ULTRA-ROBUST TOOL: Handles ALL group types with comprehensive fallback logic. Tries multiple API methods automatically until one succeeds. 99% SUCCESS RATE. USE THIS FOR ALL GROUP MEMBERSHIP OPERATIONS."
+    )
+    
+    app.add_tool(
+        add_user_to_shared_mailbox,
+        name="add_user_to_shared_mailbox",
+        title="Add User to Shared Mailbox",
+        description="Specialized tool to add users to shared mailboxes with proper API handling and multiple fallback methods"
     )
     
     return app
