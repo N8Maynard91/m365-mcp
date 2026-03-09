@@ -5,6 +5,7 @@ Provides tools to manage Microsoft 365 users and mailboxes.
 """
 
 import asyncio
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -22,6 +23,9 @@ from mcp.types import (
 )
 
 load_dotenv()
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.WARNING)
 
 # Global variables for credentials
 TENANT_ID = os.getenv("TENANT_ID")
@@ -59,6 +63,7 @@ async def get_access_token() -> str:
         
         if "access_token" in result:
             ACCESS_TOKEN = result["access_token"]
+            log.info("Token acquired")
             return ACCESS_TOKEN
         else:
             error_msg = f"Failed to acquire token: {result.get('error_description', 'Unknown error')}"
@@ -90,9 +95,8 @@ async def make_graph_request(method: str, endpoint: str, data: Optional[Dict] = 
         }
         
         url = f"{GRAPH_BASE_URL}{endpoint}"
-        
+        log.debug("%s %s", method, endpoint)
 
-        
         response = requests.request(method, url, headers=headers, json=data, timeout=30)
         
         # Enhanced error handling
@@ -120,8 +124,9 @@ async def make_graph_request(method: str, endpoint: str, data: Optional[Dict] = 
             elif response.status_code == 409:
                 guidance = "\n\nThis usually means:\n• Resource already exists\n• Conflict with existing data"
             
+            log.error("API %s: %s", response.status_code, error_detail)
             raise Exception(f"Graph API error: {response.status_code} - {error_detail}{guidance}")
-        
+
         # Handle empty responses
         if not response.content:
             return {}
@@ -3377,8 +3382,9 @@ def handle_tool_errors(func):
         try:
             return await func(*args, **kwargs)
         except Exception as e:
+            log.exception("Tool error: %s", func.__name__)
             error_message = str(e)
-            
+
             # Provide specific guidance based on error types
             if "401" in error_message:
                 error_message += "\n\n🔧 This usually means:\n• Token has expired\n• Insufficient permissions\n• Check if admin consent was granted"
@@ -3866,6 +3872,7 @@ if __name__ == "__main__":
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         
         if missing_vars:
+            log.critical("Missing env: %s", missing_vars)
             print(f"❌ Error: Missing required environment variables: {', '.join(missing_vars)}")
             print("Please set these variables in your .env file or environment.")
             print("\nExample .env file:")
@@ -3875,6 +3882,7 @@ if __name__ == "__main__":
             exit(1)
         
         # Test authentication before starting server
+        log.info("Auth check...")
         print("🔐 Testing authentication...")
         try:
             # This will be tested when the server starts
@@ -3885,13 +3893,16 @@ if __name__ == "__main__":
             exit(1)
         
         # Create and run the server
+        log.info("Booting server")
         print("🚀 Starting M365 MCP Server...")
         app = create_server()
         app.run()
         
     except KeyboardInterrupt:
+        log.info("Shutdown requested")
         print("\n👋 Server stopped by user")
     except Exception as e:
+        log.critical("Fatal: %s", e)
         print(f"❌ Server error: {e}")
         print("Please check the logs for more details.")
         exit(1)
