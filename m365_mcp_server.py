@@ -5,6 +5,7 @@ Provides tools to manage Microsoft 365 users and mailboxes.
 """
 
 import asyncio
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -22,6 +23,9 @@ from mcp.types import (
 )
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("m365-mcp")
 
 # Global variables for credentials
 TENANT_ID = os.getenv("TENANT_ID")
@@ -59,6 +63,7 @@ async def get_access_token() -> str:
         
         if "access_token" in result:
             ACCESS_TOKEN = result["access_token"]
+            logger.debug("Acquired access token successfully")
             return ACCESS_TOKEN
         else:
             error_msg = f"Failed to acquire token: {result.get('error_description', 'Unknown error')}"
@@ -90,9 +95,8 @@ async def make_graph_request(method: str, endpoint: str, data: Optional[Dict] = 
         }
         
         url = f"{GRAPH_BASE_URL}{endpoint}"
-        
+        logger.debug("Graph API request: %s %s", method, endpoint)
 
-        
         response = requests.request(method, url, headers=headers, json=data, timeout=30)
         
         # Enhanced error handling
@@ -120,8 +124,9 @@ async def make_graph_request(method: str, endpoint: str, data: Optional[Dict] = 
             elif response.status_code == 409:
                 guidance = "\n\nThis usually means:\n• Resource already exists\n• Conflict with existing data"
             
+            logger.warning("Graph API error %s %s: %s", method, endpoint, error_detail)
             raise Exception(f"Graph API error: {response.status_code} - {error_detail}{guidance}")
-        
+
         # Handle empty responses
         if not response.content:
             return {}
@@ -129,8 +134,10 @@ async def make_graph_request(method: str, endpoint: str, data: Optional[Dict] = 
         return response.json()
         
     except requests.exceptions.Timeout:
+        logger.warning("Graph API timeout: %s %s", method, endpoint)
         raise Exception(f"Request timeout: The request to {endpoint} took too long to complete")
     except requests.exceptions.ConnectionError:
+        logger.warning("Graph API connection error: %s %s", method, endpoint)
         raise Exception(f"Connection error: Unable to connect to Microsoft Graph API")
     except requests.exceptions.RequestException as e:
         raise Exception(f"Request failed: {str(e)}")
@@ -3377,6 +3384,7 @@ def handle_tool_errors(func):
         try:
             return await func(*args, **kwargs)
         except Exception as e:
+            logger.error("Tool %s failed: %s", func.__name__, e)
             error_message = str(e)
             
             # Provide specific guidance based on error types
@@ -3866,6 +3874,7 @@ if __name__ == "__main__":
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         
         if missing_vars:
+            logger.error("Missing required environment variables: %s", ", ".join(missing_vars))
             print(f"❌ Error: Missing required environment variables: {', '.join(missing_vars)}")
             print("Please set these variables in your .env file or environment.")
             print("\nExample .env file:")
@@ -3873,25 +3882,28 @@ if __name__ == "__main__":
             print("CLIENT_ID=your_client_id_here")
             print("CLIENT_SECRET=your_client_secret_here")
             exit(1)
-        
+
         # Test authentication before starting server
-        print("🔐 Testing authentication...")
+        logger.info("Testing authentication...")
         try:
             # This will be tested when the server starts
-            print("✅ Environment variables validated")
+            logger.info("Environment variables validated")
         except Exception as e:
+            logger.error("Authentication test failed: %s", e)
             print(f"❌ Authentication test failed: {e}")
             print("Please check your Azure app registration and permissions.")
             exit(1)
-        
+
         # Create and run the server
-        print("🚀 Starting M365 MCP Server...")
+        logger.info("Starting M365 MCP Server...")
         app = create_server()
         app.run()
         
     except KeyboardInterrupt:
+        logger.info("Server stopped by user")
         print("\n👋 Server stopped by user")
     except Exception as e:
+        logger.exception("Server error")
         print(f"❌ Server error: {e}")
         print("Please check the logs for more details.")
         exit(1)
